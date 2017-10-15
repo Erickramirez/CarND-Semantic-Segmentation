@@ -52,7 +52,7 @@ and in the following image, we can check that the model decreases loss over time
 ![alt text][image11]
 
 * Final hyperparameters:
- * epochs = 50 (actually it could be lower, an example of epoch #31(it has epoch30 as reference because the index started at 0) has been included, you can update it if you want at the line 170.
+ * epochs = 50 (actually it could be lower, an example of epoch #31(it has epoch30 as reference because the index started at 0) has been included, you can update it if you want at the line 170. 
  * batch_size = 4
  * learning_rate =   1e-4
 
@@ -68,3 +68,5 @@ During the training it is saving the image samples with the classification and i
 ![alt text][image8] epoch 40
 ![alt text][image9] epoch 45
 ![alt text][image10] epoch 49 
+
+The project labels most pixels of roads close to the best solution.
