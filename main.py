@@ -16,6 +16,13 @@ if not tf.test.gpu_device_name():
 else:
     print('Default GPU Device: {}'.format(tf.test.gpu_device_name()))
 
+num_classes = 2
+image_shape = (160, 576)
+data_dir = './data'
+runs_dir = './runs'
+csv_filename = "summary_trainig_loss.csv"
+
+
 
 def load_vgg(sess, vgg_path):
     """
@@ -26,14 +33,25 @@ def load_vgg(sess, vgg_path):
     """
     # TODO: Implement function
     #   Use tf.saved_model.loader.load to load the model and weights
+
     vgg_tag = 'vgg16'
     vgg_input_tensor_name = 'image_input:0'
     vgg_keep_prob_tensor_name = 'keep_prob:0'
     vgg_layer3_out_tensor_name = 'layer3_out:0'
     vgg_layer4_out_tensor_name = 'layer4_out:0'
     vgg_layer7_out_tensor_name = 'layer7_out:0'
-    
-    return None, None, None, None, None
+
+    tf.saved_model.loader.load(sess, [vgg_tag], vgg_path)
+
+    graph = tf.get_default_graph()
+    input_image = graph.get_tensor_by_name(vgg_input_tensor_name)
+    keep__prob = graph.get_tensor_by_name(vgg_keep_prob_tensor_name)
+    layer3_out = graph.get_tensor_by_name(vgg_layer3_out_tensor_name)
+    layer4_out = graph.get_tensor_by_name(vgg_layer4_out_tensor_name)
+    layer7_out = graph.get_tensor_by_name(vgg_layer7_out_tensor_name)
+
+    return input_image, keep__prob, layer3_out, layer4_out, layer7_out
+
 tests.test_load_vgg(load_vgg, tf)
 
 
@@ -47,7 +65,19 @@ def layers(vgg_layer3_out, vgg_layer4_out, vgg_layer7_out, num_classes):
     :return: The Tensor for the last layer of output
     """
     # TODO: Implement function
-    return None
+    conv_layer7_1x1 = tf.layers.conv2d(vgg_layer7_out, filters=num_classes, kernel_size=1, padding='same',name = 'conv_layer7_1x1')
+    conv_layer4_1x1 = tf.layers.conv2d(vgg_layer4_out, filters=num_classes, kernel_size=1, padding='same',name = 'conv_layer4_1x1')
+    conv_layer3_1x1 = tf.layers.conv2d(vgg_layer3_out, filters=num_classes, kernel_size=1, padding='same',name = 'conv_layer3_1x1')
+
+    decoder_layer1 = tf.layers.conv2d_transpose(conv_layer7_1x1, filters=num_classes,kernel_size= 4, strides=(2, 2), padding='same',name = 'decoder_layer1')
+    decorder_layer2 = tf.add(decoder_layer1, conv_layer4_1x1,name = 'decorder_layer2')  # adding the first skip layer
+
+    decorder_layer3 = tf.layers.conv2d_transpose(decorder_layer2, filters=num_classes, kernel_size=4, strides=(2, 2), padding='same',name = 'decorder_layer3')
+    decorder_layer4 = tf.add(decorder_layer3, conv_layer3_1x1,name = 'decorder_layer4') #  adding the second skip layer
+
+    output = tf.layers.conv2d_transpose(decorder_layer4, filters=num_classes, kernel_size=16, strides=(8, 8), padding='same',name = 'output') #returnig original image size
+
+    return output
 tests.test_layers(layers)
 
 
@@ -61,12 +91,20 @@ def optimize(nn_last_layer, correct_label, learning_rate, num_classes):
     :return: Tuple of (logits, train_op, cross_entropy_loss)
     """
     # TODO: Implement function
-    return None, None, None
+    logits = tf.reshape(nn_last_layer, (-1, num_classes))
+    labels_y = tf.reshape(correct_label, (-1, num_classes))
+
+    cross_entropy_loss = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(logits=logits, labels=labels_y))
+    train_optimizer = tf.train.AdamOptimizer(learning_rate).minimize(cross_entropy_loss)
+
+
+    return logits, train_optimizer, cross_entropy_loss
+
 tests.test_optimize(optimize)
 
 
 def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_loss, input_image,
-             correct_label, keep_prob, learning_rate):
+             correct_label, keep_prob, learning_rate,logits):
     """
     Train neural network and print out the loss during training.
     :param sess: TF Session
@@ -81,17 +119,37 @@ def train_nn(sess, epochs, batch_size, get_batches_fn, train_op, cross_entropy_l
     :param learning_rate: TF Placeholder for learning rate
     """
     # TODO: Implement function
-    pass
-tests.test_train_nn(train_nn)
 
+    sess.run(tf.global_variables_initializer())
+    for epoch in range(epochs):
+        total_training_loss = 0
+        num_samples = 0
+        for batch, (image, label) in enumerate(get_batches_fn(batch_size)): #for X, y in get_batches_fn(batch_size):
+            loss, _ = sess.run(  [cross_entropy_loss, train_op],  feed_dict={input_image: image, correct_label: label, keep_prob: 0.8, learning_rate: 1e-4} )
+            print ('Epoch:',str(epoch).zfill(2), '   batch:', str(batch).zfill(2), '   batch size:', len(label), '   training loss: ', loss )
+            total_training_loss += loss*len(label)
+            num_samples +=  len(label)
+            epoch_training_loss = total_training_loss/num_samples
+        print ('Epoch (summary):', str(epoch).zfill(2), '     training loss: ', epoch_training_loss)
+        #save the data in a csv file
+        if os.path.exists(csv_filename):
+            f = open(csv_filename, 'a')
+            str_line = "%i,%s,%.8f\n" % (epoch,  'Epoch'+ str(epoch).zfill(2), epoch_training_loss )
+            f.write(str_line)
+            f.close()
+
+        if data_dir is not None and epoch > 0 and (epoch % 5) == 0:
+            output_path =helper.save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_prob, input_image,'epoch_'+str(epoch).zfill(2)+'_')
+            print
+            helper.save_video(output_path, 'epoch_'+str(epoch).zfill(2) +'.avi', 5, image_shape)
+            print ('Generating video for Eposh: ', epoch)
+
+
+    #pass
+#tests.test_train_nn(train_nn) #It will generate error because the parameter logits has been added to the method train_nn in order to get samples every 5 epochs
 
 def run():
-    num_classes = 2
-    image_shape = (160, 576)
-    data_dir = './data'
-    runs_dir = './runs'
     tests.test_for_kitti_dataset(data_dir)
-
     # Download pretrained vgg model
     helper.maybe_download_pretrained_vgg(data_dir)
 
@@ -109,14 +167,31 @@ def run():
         #  https://datascience.stackexchange.com/questions/5224/how-to-prepare-augment-images-for-neural-network
 
         # TODO: Build NN using load_vgg, layers, and optimize function
+        epochs = 50
+        batch_size = 4
+        learning_rate = tf.placeholder(tf.float32)
+        correct_label = tf.placeholder(tf.float32, [None, image_shape[0], image_shape[1], num_classes])
+
+        input_image, keep_prob, layer3_out, layer4_out, layer7_out = load_vgg(sess, vgg_path)
+
+        layer_output = layers(layer3_out, layer4_out, layer7_out, num_classes)
+
+        logits, train_optimizer, cross_entropy_loss = optimize(layer_output, correct_label, learning_rate, num_classes)
 
         # TODO: Train NN using the train_nn function
+        f = open(csv_filename, 'w')
+        str_line = "%s,%s,%.5s\n" % ('Number', 'Epoch', 'loss')
+        f.write(str_line)
+        f.close()
+
+        train_nn(sess, epochs, batch_size, get_batches_fn, train_optimizer, cross_entropy_loss, input_image, correct_label, keep_prob, learning_rate,logits)
+
 
         # TODO: Save inference data using helper.save_inference_samples
-        #  helper.save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_prob, input_image)
+        output_path = helper.save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_prob, input_image,'final_result_')
 
         # OPTIONAL: Apply the trained model to a video
-
+        helper.save_video(output_path, 'final_result.avi',  5, image_shape)
 
 if __name__ == '__main__':
     run()

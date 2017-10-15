@@ -10,6 +10,9 @@ import tensorflow as tf
 from glob import glob
 from urllib.request import urlretrieve
 from tqdm import tqdm
+import cv2
+from cv2 import VideoWriter, VideoWriter_fourcc, imread, resize
+
 
 
 class DLProgress(tqdm):
@@ -125,16 +128,32 @@ def gen_test_output(sess, logits, keep_prob, image_pl, data_folder, image_shape)
         yield os.path.basename(image_file), np.array(street_im)
 
 
-def save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_prob, input_image):
+def save_inference_samples(runs_dir, data_dir, sess, image_shape, logits, keep_prob, input_image,prefix):
     # Make folder for current run
-    output_dir = os.path.join(runs_dir, str(time.time()))
+    output_dir = os.path.join(runs_dir,prefix+ str(time.time()))
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir)
     os.makedirs(output_dir)
 
     # Run NN on test images and save them to HD
-    print('Training Finished. Saving test images to: {}'.format(output_dir))
+    if prefix.find("final") == -1:
+        print ('Saving test images to: {} for evaluation, the training is not finished yet'.format(output_dir))
+    else:
+        print('Training Finished. Saving test images to: {}'.format(output_dir))
     image_outputs = gen_test_output(
         sess, logits, keep_prob, input_image, os.path.join(data_dir, 'data_road/testing'), image_shape)
     for name, image in image_outputs:
         scipy.misc.imsave(os.path.join(output_dir, name), image)
+    return output_dir
+
+def save_video(inference_samples_output_dir, video_file_name, fps, image_shape ):
+    # Make folder for current run
+    images = os.listdir(inference_samples_output_dir)
+    video = cv2.VideoWriter(video_file_name, cv2.VideoWriter_fourcc(*"MJPG"), fps, (image_shape[1], image_shape[0]))
+
+    for image in images:
+        image_path = os.path.join(inference_samples_output_dir, image)
+        if os.path.exists(image_path):
+            img = imread(image_path)
+            video.write(img)
+    video.release()
